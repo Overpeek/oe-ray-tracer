@@ -1,16 +1,47 @@
 #include <engine/include.hpp>
+#include <engine/graphics/opengl/gl_shader.hpp>
+#include <engine/graphics/opengl/gl_primitive_renderer.hpp>
+#include <engine/graphics/opengl/buffers/storageBuffer.hpp>
+
+
+
+struct RTVertex {
+    glm::vec3 position;
+    float __padding0;
+    glm::vec2 uv;
+    float __padding1[2];
+    glm::vec4 color;
+
+    RTVertex()
+        : position(0.0f), uv(0.0f), color(0.0f)
+    {}
+
+    RTVertex(glm::fvec3 _position, glm::fvec2 _uv, glm::fvec4 _color)
+        : position(_position), uv(_uv), color(_color)
+    {}
+
+    RTVertex(glm::fvec2 _position, glm::fvec2 _uv, glm::fvec4 _color)
+        : position(_position, 0.0f), uv(_uv), color(_color)
+    {}
+};
 
 
 
 oe::graphics::Window* window;
 oe::assets::DefaultShader* shader;
-oe::graphics::Shader* compute_shader;
+oe::graphics::GLShader* compute_shader;
 oe::graphics::PrimitiveRenderer* fb_screen_quad;
 oe::graphics::SpritePack* sprites;
+
+oe::graphics::StorageBuffer* ssbo;
+
 oe::gui::GUI* gui_manager;
+std::vector<oe::gui::Slider*> gui_sliders;
 
 oe::graphics::Texture* compute_texture;
 oe::graphics::Sprite* compute_texture_sprite;
+
+
 
 uint64_t next_power_of_2(uint64_t x)
 {
@@ -26,14 +57,35 @@ uint64_t next_power_of_2(uint64_t x)
 
 void render(float update_fraction)
 {
+    std::function<float(int)> value = [](int i) { return gui_sliders.at(i)->slider_info.initial_value; };
+
+    const std::vector<RTVertex> vertices = {
+        { { 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f }, oe::colors::red },
+        { { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f }, oe::colors::blue },
+        { { 1.0f, 0.0f, 1.0f }, { 1.0f, 1.0f }, oe::colors::green },
+
+        { { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f }, oe::colors::red },
+        { { 1.0f, 0.0f, 1.0f }, { 1.0f, 1.0f }, oe::colors::black },
+        { { 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f }, oe::colors::blue },
+
+        { { 0.2f, 0.0f, 0.0f }, { 0.0f, 0.0f }, oe::colors::transparent },
+    };
+    ssbo->setBufferData(vertices.data(), vertices.size() * sizeof(RTVertex));
+
+    glm::mat4 vw_matrix = glm::lookAt(glm::vec3(value(1), value(2), value(0)), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    compute_shader->bind();
+    compute_shader->setUniformMat4("vw_matrix", vw_matrix);
+
+    // compute
     auto work_group_size = compute_shader->workGroupSize();
     size_t res = next_power_of_2(590);
-
     compute_texture->bindCompute();
-    compute_shader->bind();
+    compute_shader->bindSSBO("vertex_buffer", ssbo, 1);
+    compute_shader->setUniform1i("triangle_count", 2);
     compute_shader->dispatchCompute({ res / work_group_size.x, res / work_group_size.y, 1 });
     compute_texture->unbindCompute();
 
+    // draw compute result to gui
     sprites->bind();
     shader->bind();
     fb_screen_quad->render();
@@ -65,6 +117,7 @@ int main()
     auto& engine = oe::Engine::getSingleton();
     oe::EngineInfo engine_info;
     engine_info.debug_messages = true;
+    // engine_info.ignore_errors = true;
     engine.init(engine_info);
 
     // window
@@ -84,10 +137,13 @@ int main()
     };
     oe::RendererInfo renderer_info;
     renderer_info.max_primitive_count = 1;
-    renderer_info.arrayRenderType = oe::types::staticrender;
+    renderer_info.arrayRenderType = oe::types::static_type;
     renderer_info.staticVBOBuffer_data = (void*)&vertices[0];
     fb_screen_quad = (oe::graphics::PrimitiveRenderer*)engine.createPrimitiveRenderer(renderer_info);
     fb_screen_quad->vertexCount() = 4;
+
+    // SSBO
+    ssbo = new oe::graphics::StorageBuffer(nullptr, 1000 * sizeof(RTVertex), oe::types::dynamic_type);
     
     // sprites
     sprites = new oe::graphics::SpritePack();
@@ -117,7 +173,7 @@ int main()
     shader_info.shader_stages = {
         { oe::shader_stages::compute_shader, shader_source }
     };
-    compute_shader = engine.createShader(shader_info);
+    compute_shader = static_cast<oe::graphics::GLShader*>(engine.createShader(shader_info));
     shader = new oe::assets::DefaultShader();
 
 	// gui
@@ -143,11 +199,33 @@ int main()
         oe::gui::DecoratedButton* btn = new oe::gui::DecoratedButton(gui_manager, dbi);
         gui_manager->addSubWidget(btn);
     }
+    for (int i = 0; i < 5; i++) {
+        oe::gui::SliderInfo si;
+        si.align_parent = oe::alignments::top_right;
+        si.align_render = oe::alignments::top_right;
+        si.offset_position = { 0, (i + 1) * 60 };
+        si.slider_size = { 295, 50 };
+        si.knob_size = { 50, 50 };
+        si.draw_value = true;
+        si.min_value = -1.0f;
+        si.max_value = 1.0f;
+        si.slider_sprite = sprites->empty_sprite();
+        si.knob_sprite = sprites->empty_sprite();
+        auto slider = new oe::gui::Slider(gui_manager, si);
+        gui_sliders.push_back(slider);
+        gui_manager->addSubWidget(slider);
+    }
+    std::function<void(int, float)> initial = [](int i, float f) { gui_sliders.at(i)->slider_info.initial_value = f; };
+    initial(0, 0.34f);
+    initial(1, 0.13f);
+    initial(2, 0.62f);
 
     // start
     window->getGameloop().start();
 
     // cleanup
+    delete gui_manager;
+    for (auto i : gui_sliders) { delete i; }
     delete compute_texture_sprite;
     delete compute_texture;
     delete fonts;
