@@ -8,20 +8,22 @@
 struct RTVertex {
     glm::vec3 position;
     float __padding0;
-    glm::vec2 uv;
+    glm::vec2 uv_texture;
     float __padding1[2];
+    glm::vec2 uv_reflect;
+    float __padding2[2];
     glm::vec4 color;
 
     RTVertex()
-        : position(0.0f), uv(0.0f), color(0.0f)
+        : position(0.0f), uv_texture(0.0f), color(0.0f)
     {}
 
-    RTVertex(glm::fvec3 _position, glm::fvec2 _uv, glm::fvec4 _color)
-        : position(_position), uv(_uv), color(_color)
+    RTVertex(glm::fvec3 _position, glm::fvec2 _uv_texture, glm::fvec2 _uv_reflectiveness, glm::fvec4 _color)
+        : position(_position), uv_texture(_uv_texture), uv_reflect(_uv_reflectiveness), color(_color)
     {}
 
-    RTVertex(glm::fvec2 _position, glm::fvec2 _uv, glm::fvec4 _color)
-        : position(_position, 0.0f), uv(_uv), color(_color)
+    RTVertex(glm::fvec2 _position, glm::fvec2 _uv_texture, glm::fvec2 _uv_reflectiveness, glm::fvec4 _color)
+        : position(_position, 0.0f), uv_texture(_uv_texture), uv_reflect(_uv_reflectiveness), color(_color)
     {}
 };
 
@@ -32,6 +34,9 @@ oe::assets::DefaultShader* shader;
 oe::graphics::GLShader* compute_shader;
 oe::graphics::PrimitiveRenderer* fb_screen_quad;
 oe::graphics::SpritePack* sprites;
+const oe::graphics::Sprite* checkerboard_sprite;
+const oe::graphics::Sprite* obj_sprite;
+const oe::graphics::Sprite* obj_ref_sprite;
 
 oe::graphics::StorageBuffer* ssbo;
 
@@ -57,31 +62,52 @@ uint64_t next_power_of_2(uint64_t x)
 
 void render(float update_fraction)
 {
-    std::function<float(int)> value = [](int i) { return gui_sliders.at(i)->slider_info.initial_value; };
+    std::function<float(int)> v = [](int i) { return gui_sliders.at(i)->slider_info.initial_value; };
 
-    const std::vector<RTVertex> vertices = {
-        { { 0.0f, 0.0f, 0.0f }, { 0.0f, 1.0f }, oe::colors::red },
-        { { 0.0f, 0.0f, 1.0f }, { 0.0f, 1.0f }, oe::colors::blue },
-        { { 1.0f, 0.0f, 1.0f }, { 1.0f, 1.0f }, oe::colors::green },
+    std::array<glm::vec2, 3> p = { checkerboard_sprite->position, obj_sprite->position, obj_ref_sprite->position };
+    std::array<glm::vec2, 3> s = { checkerboard_sprite->size, obj_sprite->size, obj_ref_sprite->size };
+    std::vector<RTVertex> vertices = {
+        // floor
+        { { -5.0f, 0.0f, -5.0f }, { p[0].x,          p[0].y          }, { p[0].x,          p[0].y          }, oe::colors::white },
+        { { -5.0f, 0.0f,  5.0f }, { p[0].x + s[0].x, p[0].y          }, { p[0].x + s[0].x, p[0].y          }, oe::colors::white },
+        { {  5.0f, 0.0f,  5.0f }, { p[0].x + s[0].x, p[0].y + s[0].y }, { p[0].x + s[0].x, p[0].y + s[0].y }, oe::colors::white },
 
-        { { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f }, oe::colors::red },
-        { { 1.0f, 0.0f, 1.0f }, { 1.0f, 1.0f }, oe::colors::black },
-        { { 1.0f, 0.0f, 0.0f }, { 0.0f, 1.0f }, oe::colors::blue },
+        { { -5.0f, 0.0f, -5.0f }, { p[0].x,          p[0].y          }, { p[0].x,          p[0].y          }, oe::colors::white },
+        { {  5.0f, 0.0f,  5.0f }, { p[0].x + s[0].x, p[0].y + s[0].y }, { p[0].x + s[0].x, p[0].y + s[0].y }, oe::colors::white },
+        { {  5.0f, 0.0f, -5.0f }, { p[0].x,          p[0].y + s[0].y }, { p[0].x,          p[0].y + s[0].y }, oe::colors::white },
 
-        { { 0.2f, 0.0f, 0.0f }, { 0.0f, 0.0f }, oe::colors::transparent },
+        // wall
+        { { -2.0f,  0.0f, 6.0f }, { p[0].x,          p[0].y          }, { p[0].x,          p[0].y          }, oe::colors::white },
+        { { -2.0f, 10.0f, 6.0f }, { p[0].x + s[0].x, p[0].y          }, { p[0].x + s[0].x, p[0].y          }, oe::colors::white },
+        { {  8.0f, 10.0f, 0.0f }, { p[0].x + s[0].x, p[0].y + s[0].y }, { p[0].x + s[0].x, p[0].y + s[0].y }, oe::colors::white },
+
+        { { -2.0f,  0.0f, 6.0f }, { p[0].x,          p[0].y          }, { p[0].x,          p[0].y          }, oe::colors::white },
+        { {  8.0f, 10.0f, 0.0f }, { p[0].x + s[0].x, p[0].y + s[0].y }, { p[0].x + s[0].x, p[0].y + s[0].y }, oe::colors::white },
+        { {  8.0f,  0.0f, 0.0f }, { p[0].x,          p[0].y + s[0].y }, { p[0].x,          p[0].y + s[0].y }, oe::colors::white },
+
+        // obj
+        { { -0.9f, 1.0f, -1.0f }, { p[1].x,          p[1].y          }, { p[2].x,          p[2].y          }, oe::colors::white },
+        { { -0.9f, 0.0f, -1.0f }, { p[1].x + s[1].x, p[1].y          }, { p[2].x + s[2].x, p[2].y          }, oe::colors::white },
+        { {  0.0f, 0.0f, -0.7f }, { p[1].x + s[1].x, p[1].y + s[1].y }, { p[2].x + s[2].x, p[2].y + s[2].y }, oe::colors::white },
+
+        { { -0.9f, 1.0f, -1.0f }, { p[1].x,          p[1].y          }, { p[2].x,          p[2].y          }, oe::colors::white },
+        { {  0.0f, 0.0f, -0.7f }, { p[1].x + s[1].x, p[1].y + s[1].y }, { p[2].x + s[2].x, p[2].y + s[2].y }, oe::colors::white },
+        { {  0.0f, 1.0f, -0.7f }, { p[1].x,          p[1].y + s[1].y }, { p[2].x,          p[2].y + s[2].y }, oe::colors::white },
     };
     ssbo->setBufferData(vertices.data(), vertices.size() * sizeof(RTVertex));
 
-    glm::mat4 vw_matrix = glm::lookAt(glm::vec3(value(1), value(2), value(0)), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    glm::mat4 vw_matrix = glm::lookAt(glm::vec3(cos(v(0) * 7.0f), v(1), sin(v(0) * 7.0f)), glm::vec3(0.0f, v(2), 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     compute_shader->bind();
     compute_shader->setUniformMat4("vw_matrix", vw_matrix);
+    
 
     // compute
+    sprites->bind();
     auto work_group_size = compute_shader->workGroupSize();
     size_t res = next_power_of_2(590);
     compute_texture->bindCompute();
     compute_shader->bindSSBO("vertex_buffer", ssbo, 1);
-    compute_shader->setUniform1i("triangle_count", 2);
+    compute_shader->setUniform1i("triangle_count", 6);
     compute_shader->dispatchCompute({ res / work_group_size.x, res / work_group_size.y, 1 });
     compute_texture->unbindCompute();
 
@@ -149,6 +175,9 @@ int main()
     sprites = new oe::graphics::SpritePack();
     auto fonts = new oe::graphics::Font(sprites);
 	oe::graphics::Text::setFont(*fonts);
+    checkerboard_sprite = sprites->addSprite("res/checkerboard.png");
+    obj_ref_sprite = sprites->addSprite("res/obj.reflectiveness.png");
+    obj_sprite = sprites->addSprite("res/obj.texture.png");
     sprites->construct();
     // sprites->empty_sprite();
     oe::TextureInfo ti;
@@ -207,8 +236,8 @@ int main()
         si.slider_size = { 295, 50 };
         si.knob_size = { 50, 50 };
         si.draw_value = true;
-        si.min_value = -1.0f;
-        si.max_value = 1.0f;
+        si.min_value = -2.0f;
+        si.max_value = 2.0f;
         si.slider_sprite = sprites->empty_sprite();
         si.knob_sprite = sprites->empty_sprite();
         auto slider = new oe::gui::Slider(gui_manager, si);
@@ -216,9 +245,9 @@ int main()
         gui_manager->addSubWidget(slider);
     }
     std::function<void(int, float)> initial = [](int i, float f) { gui_sliders.at(i)->slider_info.initial_value = f; };
-    initial(0, 0.34f);
-    initial(1, 0.13f);
-    initial(2, 0.62f);
+    initial(0, -1.15f);
+    initial(1, 1.36f);
+    initial(2, 1.0f);
 
     // start
     window->getGameloop().start();
