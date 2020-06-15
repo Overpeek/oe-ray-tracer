@@ -200,7 +200,7 @@ int main()
     oe::ShaderInfo shader_info;
     shader_info.name = "compute-rays";
     shader_info.shader_stages = {
-        { oe::shader_stages::compute_shader, shader_source }
+        { oe::shader_stages::compute_shader, shader_source, "res" }
     };
     compute_shader = static_cast<oe::graphics::GLShader*>(engine.createShader(shader_info));
     shader = new oe::assets::DefaultShader();

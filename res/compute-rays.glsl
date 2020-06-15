@@ -1,28 +1,6 @@
 #version 430 core
 
-struct VertexData
-{
-	vec3 pos;
-	float pad0;
-	vec2 uv_t;
-	float pad1[2];
-	vec2 uv_r;
-	float pad2[2];
-	vec4 color;
-};
-
-layout(binding = 0, rgba32f) uniform image2D framebuffer;
-layout (std430, binding = 1) readonly buffer vertex_buffer
-{
-	VertexData vertex[1000];
-} vertices;
-layout(local_size_x = 16, local_size_y = 16) in;
-
-uniform sampler2D texture_sampler;
-uniform int triangle_count = 0;
-uniform mat4 ml_matrix = mat4(1.0f);
-uniform mat4 vw_matrix = mat4(1.0f);
-const float kEpsilon = 0.0001f;
+#include "compute-rays.layout.glsl"
 
 
 
@@ -33,17 +11,38 @@ VertexData getVertex(int index)
 	vrt.pos = _gl_pos.xyz;
 	return vrt;
 }
-bool rayTriangleIntersect(in vec3 origin, in vec3 direction, int index_buffer_first, out float t, out float u, out float v);
 
-struct RayData
+bool rayTriangleIntersect(in vec3 origin, in vec3 direction, int index_first, out float t, out float u, out float v)
 {
-	vec3 dir;
-	vec3 origin;
-	vec4 color;
 
-	int last_triangle;
-};
+	vec3 v0 = getVertex(index_first + 0).pos;
+	vec3 v1 = getVertex(index_first + 1).pos;
+	vec3 v2 = getVertex(index_first + 2).pos;
 
+    vec3 v0v1 = v1 - v0;
+    vec3 v0v2 = v2 - v0;
+    vec3 pvec = cross(direction, v0v2);
+    float det = dot(v0v1, pvec);
+
+	// cull mode
+    // if (det < kEpsilon) return false;
+    if (abs(det) < kEpsilon) return false;
+
+
+    float invDet = 1.0f / det;
+ 
+    vec3 tvec = origin - v0;
+    u = dot(tvec, pvec) * invDet;
+    if (u < 0.0f || u > 1.0f) return false;
+ 
+    vec3 qvec = cross(tvec, v0v1);
+    v = dot(direction, qvec) * invDet;
+    if (v < 0.0f || u + v > 1.0f) return false;
+ 
+    t = dot(v0v2, qvec) * invDet;
+ 
+    return true;
+}
 
 void ray_scene(in RayData ray, out int triangle_index, out vec3 hit_data)
 {
@@ -66,6 +65,17 @@ void ray_scene(in RayData ray, out int triangle_index, out vec3 hit_data)
 	}
 
 	hit_data = vec3(t, u, v);
+}
+
+void normal_triangle(in vec3 v[3], out vec3 n)
+{
+	vec3 vA = v[1] - v[0];
+	vec3 vB = v[2] - v[0];
+	n = vec3(
+		vA.y * vB.z - vA.z * vB.y, 
+		vA.z * vB.x - vA.x * vB.z, 
+		vA.x * vB.y - vA.y * vB.x
+	);
 }
 
 void main(void) {
@@ -112,13 +122,22 @@ void main(void) {
 			uv_t += v1.uv_t * second;
 			uv_t += v2.uv_t * third;
 
+#define COLORMODE 0
+#if COLORMODE == 0
 			vec4 col = vec4(0.0f);
 			col += v0.color * first;
 			col += v1.color * second;
 			col += v2.color * third;
+			col *= texture(texture_sampler, uv_t);
+#else
+			vec4 col;
+			vec3 vertices[3] = { v0.pos, v1.pos, v2.pos };
+			normal_triangle(vertices, col.rgb);
+#endif
 
-			ray.color *= texture(texture_sampler, uv_t) * col;
+			ray.color *= col;
 
+#if COLORMODE == 0
 			// bounce or not?
 			vec2 uv_r = vec2(0.0f);
 			uv_r += v0.uv_r * first;
@@ -126,22 +145,18 @@ void main(void) {
 			uv_r += v2.uv_r * third;
 			float r = texture(texture_sampler, uv_r).r;
 			if (r > kEpsilon) {
-				// normal
-				vec3 vA = v1.pos - v0.pos;
-				vec3 vB = v2.pos - v0.pos;
-				vec3 n = vec3(
-					vA.y * vB.z - vA.z * vB.y, 
-					vA.z * vB.x - vA.x * vB.z, 
-					vA.x * vB.y - vA.y * vB.x
-				);
-				
 				vec3 hitpos = ray.origin + hit_data.x * ray.dir;
+				// normal
+				vec3 normal;
+				vec3 vertices[3] = { v0.pos, v1.pos, v2.pos };
+				normal_triangle(vertices, normal);
 
 				ray.origin = hitpos;
-				ray.dir = reflect(ray.dir, n);
+				ray.dir = reflect(ray.dir, normal);
 				ray.color *= r;
 				continue;
 			}
+#endif
 			break;
 		}
 	}
@@ -151,35 +166,3 @@ void main(void) {
 	// store pixel result
 	imageStore(framebuffer, pix, ray.color);
 }
-
-bool rayTriangleIntersect(in vec3 origin, in vec3 direction, int index_first, out float t, out float u, out float v)
-{
-
-	vec3 v0 = getVertex(index_first + 0).pos;
-	vec3 v1 = getVertex(index_first + 1).pos;
-	vec3 v2 = getVertex(index_first + 2).pos;
-
-    vec3 v0v1 = v1 - v0;
-    vec3 v0v2 = v2 - v0;
-    vec3 pvec = cross(direction, v0v2);
-    float det = dot(v0v1, pvec);
-
-	// cull mode
-    // if (det < kEpsilon) return false;
-    if (abs(det) < kEpsilon) return false;
-
-
-    float invDet = 1.0f / det;
- 
-    vec3 tvec = origin - v0;
-    u = dot(tvec, pvec) * invDet;
-    if (u < 0.0f || u > 1.0f) return false;
- 
-    vec3 qvec = cross(tvec, v0v1);
-    v = dot(direction, qvec) * invDet;
-    if (v < 0.0f || u + v > 1.0f) return false;
- 
-    t = dot(v0v2, qvec) * invDet;
- 
-    return true;
-} 
