@@ -9,6 +9,14 @@ struct VertexData
 	vec4 color;
 };
 
+struct SphereObjs
+{
+	vec3 pos;
+	float pad0;
+	vec4 extra; // x = refractivity, y = reflectivity, z = smoothness, w = luminance
+	vec4 color;
+};
+
 struct RayData
 {
 	vec3 dir;
@@ -23,10 +31,15 @@ layout (std430, binding = 1) readonly buffer vertex_buffer
 {
 	VertexData vertex[1000];
 } vertices;
+layout (std430, binding = 2) readonly buffer sphereobj_buffer
+{
+	SphereObjs sphere[1000];
+} spheres;
 layout(local_size_x = 16, local_size_y = 16) in;
 
 uniform sampler2D texture_sampler;
 uniform int triangle_count = 0;
+uniform int normaldraw = 0;
 uniform mat4 ml_matrix = mat4(1.0f);
 uniform mat4 vw_matrix = mat4(1.0f);
 const float kEpsilon = 0.0001f;

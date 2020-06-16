@@ -71,27 +71,51 @@ void normal_triangle(in vec3 v[3], out vec3 n)
 {
 	vec3 vA = v[1] - v[0];
 	vec3 vB = v[2] - v[0];
-	n = vec3(
-		vA.y * vB.z - vA.z * vB.y, 
-		vA.z * vB.x - vA.x * vB.z, 
-		vA.x * vB.y - vA.y * vB.x
-	);
+	n = normalize(cross(vA, vB));
+	// n = vec3(
+	// 	vA.y * vB.z - vA.z * vB.y, 
+	// 	vA.z * vB.x - vA.x * vB.z, 
+	// 	vA.x * vB.y - vA.y * vB.x
+	// );
 }
 
-void main(void) {
-	// ray dir calculating
-	ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
-	ivec2 size = imageSize(framebuffer);
-	if (pix.x >= size.x || pix.y >= size.y) {
-		return;
-	}
-	vec2 pos = (2.0f * vec2(pix) / vec2(size.x - 1, size.y - 1)) - 1.0f;
-	pos.y *= -1.0f;
-
-	// ray tracing
+vec4 drawmode_normals(in vec2 pos)
+{
+	// init ray
 	RayData ray;
 	ray.dir = normalize(vec3(pos, -1.0f));
-	ray.origin = vec3(0.0f, 0.0f, 1.0f);
+	ray.origin = vec3(0.0f, 0.0f, 0.0f);
+	ray.color = vec4(1.0f);
+	ray.last_triangle = -1;
+
+	// do ray
+	int triangle_index = -1;
+	vec3 hit_data;
+	ray_scene(ray, triangle_index, hit_data);
+
+	// miss
+	if (triangle_index == -1) return vec4(0.0f);
+
+	// triangle hit
+	float first = 1.0f-hit_data.y-hit_data.z;
+	float second = hit_data.y;
+	float third = hit_data.z;
+	VertexData v0 = getVertex(triangle_index * 3 + 0);
+	VertexData v1 = getVertex(triangle_index * 3 + 1);
+	VertexData v2 = getVertex(triangle_index * 3 + 2);
+	
+	vec4 col;
+	vec3 vertices[3] = { v0.pos, v1.pos, v2.pos };
+	normal_triangle(vertices, col.rgb);
+	return col;
+}
+
+vec4 drawmode_regular(in vec2 pos)
+{
+	// init ray
+	RayData ray;
+	ray.dir = normalize(vec3(pos, -1.0f));
+	ray.origin = vec3(0.0f, 0.0f, 0.0f);
 	ray.color = vec4(1.0f);
 	ray.last_triangle = -1;
 	const int bounces = 16;
@@ -102,12 +126,7 @@ void main(void) {
 		ray_scene(ray, triangle_index, hit_data);
 		ray.last_triangle = triangle_index;
 		
-		if (triangle_index == -1)
-		{
-			// miss
-			break;
-		}
-		else
+		if (triangle_index != -1)
 		{
 			// triangle hit
 			float first = 1.0f-hit_data.y-hit_data.z;
@@ -117,27 +136,21 @@ void main(void) {
 			VertexData v1 = getVertex(triangle_index * 3 + 1);
 			VertexData v2 = getVertex(triangle_index * 3 + 2);
 
+			// texture
 			vec2 uv_t = vec2(0.0f);
 			uv_t += v0.uv_t * first;
 			uv_t += v1.uv_t * second;
 			uv_t += v2.uv_t * third;
 
-#define COLORMODE 0
-#if COLORMODE == 0
+			// color
 			vec4 col = vec4(0.0f);
 			col += v0.color * first;
 			col += v1.color * second;
 			col += v2.color * third;
 			col *= texture(texture_sampler, uv_t);
-#else
-			vec4 col;
-			vec3 vertices[3] = { v0.pos, v1.pos, v2.pos };
-			normal_triangle(vertices, col.rgb);
-#endif
 
 			ray.color *= col;
 
-#if COLORMODE == 0
 			// bounce or not?
 			vec2 uv_r = vec2(0.0f);
 			uv_r += v0.uv_r * first;
@@ -156,13 +169,45 @@ void main(void) {
 				ray.color *= r;
 				continue;
 			}
-#endif
+			else
+			{
+				triangle_index = -1;
+			}
+		}
+		// not elif so i can hack ambient color when not bouncing
+		if (triangle_index == -1) // miss
+		{
+			// ambient color
+			// ray.color *= vec4(0.0f, 0.0f, 0.0f, 0.0f);
 			break;
 		}
 	}
 
+	return ray.color;
+}
 
+void main(void) {
+	// ray dir calculating
+	ivec2 pix = ivec2(gl_GlobalInvocationID.xy);
+	ivec2 size = imageSize(framebuffer);
+	if (pix.x >= size.x || pix.y >= size.y) {
+		return;
+	}
+	vec2 pos = (2.0f * vec2(pix) / vec2(size.x - 1, size.y - 1)) - 1.0f;
+	pos.y *= -1.0f;
+
+	// ray tracing
+	vec4 color;
+	switch(normaldraw)
+	{
+	case 0:
+		color = drawmode_regular(pos);
+		break;
+	default:
+		color = drawmode_normals(pos);
+		break;
+	}
     
 	// store pixel result
-	imageStore(framebuffer, pix, ray.color);
+	imageStore(framebuffer, pix, color);
 }
