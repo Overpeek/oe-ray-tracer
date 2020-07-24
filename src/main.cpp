@@ -26,15 +26,16 @@ struct Vertex {
 struct SphereObj {
 	glm::vec3 position;
 	float __padding0;
-	glm::vec4 extra;
+	glm::vec4 extra0;
+	glm::vec4 extra1;
 	glm::vec4 color;
 
     SphereObj()
-        : position(0.0f), extra(0.0f, 0.0f, 0.0f, 0.0f), color(0.0f)
+        : position(0.0f), extra0(0.0f, 0.0f, 0.0f, 0.0f), extra1(0.0f, 0.0f, 0.0f, 0.0f), color(0.0f)
     {}
 
-    SphereObj(glm::vec3 _position, glm::vec4 _extra, glm::vec4 _color)
-        : position(_position), extra(_extra), color(_color)
+    SphereObj(glm::vec3 _position, glm::vec4 _extra0, glm::vec4 _extra1, glm::vec4 _color)
+        : position(_position), extra0(_extra0), extra1(_extra1), color(_color)
     {}
 };
 
@@ -42,10 +43,10 @@ struct SphereObj {
 
 typedef std::array<const oe::graphics::Sprite*, 2> tex_ref_sprite;
 
-oe::graphics::Window* window;
+oe::graphics::Window window;
+oe::graphics::Shader compute_shader;
+oe::graphics::PrimitiveRenderer fb_screen_quad;
 oe::assets::DefaultShader* shader;
-oe::graphics::GLShader* compute_shader;
-oe::graphics::PrimitiveRenderer* fb_screen_quad;
 oe::graphics::SpritePack* sprites;
 const oe::graphics::Sprite* oe_sprite;
 tex_ref_sprite checkerboard_sprite;
@@ -58,8 +59,8 @@ oe::gui::GUI* gui_manager;
 std::vector<oe::gui::Slider*> gui_sliders;
 oe::gui::Checkbox* gui_checkbox;
 
-oe::graphics::Texture* compute_texture;
-oe::graphics::Sprite* compute_texture_sprite;
+oe::graphics::Texture compute_texture;
+oe::graphics::Sprite compute_texture_sprite;
 
 glm::vec3 cam_pos = { 0.0f, 0.5f, 0.0f, };
 glm::vec2 cam_orient = { 0.0f, 0.0f };
@@ -78,7 +79,7 @@ uint64_t next_power_of_2(uint64_t x)
     return ++x;
 }
 
-void append_quad(const glm::vec3& pos, const glm::vec2& size, const glm::quat& orient, const tex_ref_sprite& sprites, const glm::vec4& color, std::vector<Vertex>& vertices)
+void append_quad(const glm::vec3& pos, const glm::vec2& size, const glm::mat4& orient, const tex_ref_sprite& sprites, const glm::vec4& color, std::vector<Vertex>& vertices)
 {
     glm::vec2 size_half = size * 0.5f;
 
@@ -90,28 +91,30 @@ void append_quad(const glm::vec3& pos, const glm::vec2& size, const glm::quat& o
     vertices.push_back({ {  size_half.x, 0.0f,  size_half.y }, { sprites[0]->position.x + sprites[0]->size.x, sprites[0]->position.y + sprites[0]->size.y }, { sprites[1]->position.x + sprites[1]->size.x, sprites[1]->position.y + sprites[1]->size.y }, color });
     vertices.push_back({ {  size_half.x, 0.0f, -size_half.y }, { sprites[0]->position.x,                      sprites[0]->position.y + sprites[0]->size.y }, { sprites[1]->position.x,                      sprites[1]->position.y + sprites[1]->size.y }, color });
 
-    glm::mat4 mat_orient = glm::mat4(orient);
     for (auto& iter = vertices.rbegin(); iter != vertices.rbegin() + 6; iter++)
     {
-        iter->position = pos + glm::vec3(mat_orient * glm::vec4(iter->position, 0.0f));
+        iter->position = pos + glm::vec3(orient * glm::vec4(iter->position, 0.0f));
     }
 }
 
 void render(float update_fraction)
 {
     std::function<float(int)> v = [](int i) { return gui_sliders.at(i)->slider_info.initial_value; };
+    float t = oe::utils::Clock::getSingleton().getSessionMillisecond() / 1000.0f;
 
-    // float t = oe::utils::Clock::getSingleton().getSessionMillisecond() / 1000.0f;
     // vertices
+    glm::mat4 vertical = glm::rotate(glm::half_pi<float>(), glm::vec3(0.0f, 0.0f, 1.0f));
     std::vector<Vertex> vertices;
-    append_quad(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec2(10.0f), glm::angleAxis(0.0f, glm::normalize(glm::vec3(0.0f, 1.0f, 0.0f))), checkerboard_sprite, oe::colors::white, vertices);
-    append_quad(glm::vec3(4.0f, 2.5f, 4.0f), glm::vec2(10.0f), glm::angleAxis(glm::half_pi<float>(), glm::normalize(glm::vec3(1.0f, -0.7f, -1.0f))), { sprites->empty_sprite(), sprites->empty_sprite() }, oe::colors::light_grey, vertices);
-    // append_quad(glm::vec3(0.0f, 0.5f, 0.5f), glm::vec2(1.0f), glm::angleAxis(1.0f, glm::vec3(0.0f, 1.0f, 0.0f)), obj_sprite, vertices);
+    append_quad(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec2(10.0f), glm::mat4(1.0f), checkerboard_sprite, oe::colors::white, vertices);
+    append_quad(glm::vec3(4.0f, 2.5f, 4.0f), glm::vec2(10.0f), glm::rotate(glm::half_pi<float>(), glm::vec3(0.0f, 1.0f, 0.0f)) * vertical, { sprites->empty_sprite(), sprites->empty_sprite() }, oe::colors::light_grey, vertices);
+    append_quad(glm::vec3(0.0f, 0.5f, 0.5f), glm::vec2(1.0f), glm::rotate(2.0f, glm::vec3(0.0f, 1.0f, 0.0f)) * vertical, obj_sprite, oe::colors::white, vertices);
     vertex_ssbo->setBufferData(vertices.data(), vertices.size() * sizeof(Vertex));
     // spheres
     const std::vector<SphereObj> sphereobjs = 
-    {};
-    vertex_ssbo->setBufferData(vertices.data(), vertices.size() * sizeof(SphereObj));
+    {
+        { { 0.0f, 5.0f, 0.0f }, { 1.0f, 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 0.0f, 1.0f }, oe::colors::white }
+    };
+    sphereobj_ssbo->setBufferData(sphereobjs.data(), sphereobjs.size() * sizeof(SphereObj));
 
     // view matrix
     glm::mat4 vw_matrix = glm::lookAt(cam_pos, cam_pos + glm::vec3(cos(cam_orient.y) * cos(cam_orient.x), sin(cam_orient.y), cos(cam_orient.y) * sin(cam_orient.x)), glm::vec3(0.0f, 1.0f, 0.0f));
@@ -120,14 +123,15 @@ void render(float update_fraction)
     
     // compute
     sprites->bind();
-    auto work_group_size = compute_shader->workGroupSize();
-    size_t res = next_power_of_2(590);
+    auto work_group_size = compute_shader.getGL()->workGroupSize();
+    size_t res = next_power_of_2(590 * 2);
     compute_texture->bindCompute();
-    compute_shader->bindSSBO("vertex_buffer", vertex_ssbo, 1);
-    compute_shader->bindSSBO("sphereobj_buffer", sphereobj_ssbo, 2);
+    compute_shader.getGL()->bindSSBO("vertex_buffer", vertex_ssbo, 1);
+    compute_shader.getGL()->bindSSBO("sphereobj_buffer", sphereobj_ssbo, 2);
     compute_shader->setUniform1i("triangle_count", 6);
+    compute_shader->setUniform1i("sphere_count", 1);
     compute_shader->setUniform1i("normaldraw", gui_checkbox->m_checkbox_info.initial);
-    compute_shader->dispatchCompute({ res / work_group_size.x, res / work_group_size.y, 1 });
+    compute_shader.getGL()->dispatchCompute({ res / work_group_size.x, res / work_group_size.y, 1 });
     compute_texture->unbindCompute();
 
     // draw compute result to gui
@@ -156,9 +160,9 @@ void update()
     glm::vec3 dir(0.0f);
     const float movement_speed = 0.06f;
     if (window->key(oe::keys::key_w))
-        dir += glm::vec3(cos(cam_orient.x), sin(cam_orient.y), sin(cam_orient.x));
+        dir += glm::vec3(cos(cam_orient.y) * cos(cam_orient.x), sin(cam_orient.y), cos(cam_orient.y) * sin(cam_orient.x));
     if (window->key(oe::keys::key_s))
-        dir -= glm::vec3(cos(cam_orient.x), sin(cam_orient.y), sin(cam_orient.x));
+        dir -= glm::vec3(cos(cam_orient.y) * cos(cam_orient.x), sin(cam_orient.y), cos(cam_orient.y) * sin(cam_orient.x));
     if (window->key(oe::keys::key_a))
         dir += glm::vec3(sin(cam_orient.x), 0.0f, -cos(cam_orient.x));
     if (window->key(oe::keys::key_d))
@@ -176,6 +180,16 @@ void update_2()
 {
 	auto& gameloop = window->getGameloop(); 
 	spdlog::info("frametime: {:3.3f} ms ({} fps)", gameloop.getFrametimeMS(), gameloop.getAverageFPS());
+}
+
+void keyboardEvent(const oe::KeyboardEvent& e)
+{
+	if (e.action == oe::actions::press && e.key == oe::keys::key_f12)
+	{
+		// save screenshot
+		auto img = compute_texture->getImageData();
+		oe::utils::FileIO::getSingleton().saveImage("screenshot.png", img);
+	}
 }
 
 void resize(const oe::ResizeEvent& event)
@@ -200,7 +214,9 @@ int main()
     window_info.title = "oe-ray-tracer";
     window_info.resizeable = false;
     window_info.swap_interval = 0;
-    window = engine.createWindow(window_info);
+	window_info.multisamples = 2;
+    window = oe::graphics::Window(window_info);
+	window->connect_listener<oe::KeyboardEvent, keyboardEvent>();
 
     // renderer
     const std::vector<oe::graphics::VertexData> vertices = {
@@ -213,7 +229,7 @@ int main()
     renderer_info.max_primitive_count = 1;
     renderer_info.arrayRenderType = oe::types::static_type;
     renderer_info.staticVBOBuffer_data = (void*)&vertices[0];
-    fb_screen_quad = (oe::graphics::PrimitiveRenderer*)engine.createPrimitiveRenderer(renderer_info);
+    fb_screen_quad = oe::graphics::PrimitiveRenderer(renderer_info);
     fb_screen_quad->vertexCount() = 4;
 
     // SSBO:s
@@ -222,8 +238,8 @@ int main()
     
     // sprites
     sprites = new oe::graphics::SpritePack();
-    auto fonts = new oe::graphics::Font(sprites);
-	oe::graphics::Text::setFont(*fonts);
+    auto fonts = new oe::graphics::Font();
+	oe::graphics::Text::setFont(fonts);
     checkerboard_sprite = { sprites->addSprite("res/checkerboard.tex.png"), sprites->addSprite("res/checkerboard.ref.png") };
     obj_sprite = { sprites->addSprite("res/obj.tex.png"), sprites->addSprite("res/obj.ref.png") };
     oe_sprite = sprites->addSprite(oe::assets::TextureSet::oe_logo_img);
@@ -231,11 +247,11 @@ int main()
     // sprites->empty_sprite();
     oe::TextureInfo ti;
     ti.empty = true;
-    ti.size = { 590, 590 };
+    ti.size = { 590 * 2, 590 * 2 };
     ti.offset = { 0, 0 };
     ti.data_format = oe::formats::rgba;
-    compute_texture = engine.createTexture(ti);
-    compute_texture_sprite = new oe::graphics::Sprite(compute_texture);
+    compute_texture = oe::graphics::Texture(ti);
+    compute_texture_sprite.m_owner = compute_texture;
 
     // events
     window->connect_render_listener<&render>();
@@ -251,7 +267,7 @@ int main()
     shader_info.shader_stages = {
         { oe::shader_stages::compute_shader, shader_source, "res" }
     };
-    compute_shader = static_cast<oe::graphics::GLShader*>(engine.createShader(shader_info));
+    compute_shader = oe::graphics::Shader(shader_info);
     shader = new oe::assets::DefaultShader();
 
 	// gui
@@ -262,9 +278,9 @@ int main()
         spi.align_parent = oe::alignments::top_left;
         spi.align_render = oe::alignments::top_left;
         spi.offset_position = { 0, 0 };
-        spi.sprite = compute_texture_sprite;
+        spi.sprite = &compute_texture_sprite;
         spi.color = oe::colors::white;
-        oe::gui::SpritePanel* sp = new oe::gui::SpritePanel(gui_manager, spi);
+        oe::gui::SpritePanel* sp = new oe::gui::SpritePanel(spi);
         gui_manager->addSubWidget(sp);
     }
     {
@@ -272,9 +288,9 @@ int main()
         dbi.align_parent = oe::alignments::top_right;
         dbi.align_render = oe::alignments::top_right;
         dbi.size = { 295, 50 };
-        dbi.text = "button";
+        dbi.text = U"button";
         dbi.sprite = sprites->empty_sprite();
-        oe::gui::DecoratedButton* btn = new oe::gui::DecoratedButton(gui_manager, dbi);
+        oe::gui::DecoratedButton* btn = new oe::gui::DecoratedButton(dbi);
         gui_manager->addSubWidget(btn);
     }
     for (int i = 0; i < 5; i++) {
@@ -289,7 +305,7 @@ int main()
         si.max_value = 2.0f;
         si.slider_sprite = sprites->empty_sprite();
         si.knob_sprite = sprites->empty_sprite();
-        auto slider = new oe::gui::Slider(gui_manager, si);
+        auto slider = new oe::gui::Slider(si);
         gui_sliders.push_back(slider);
         gui_manager->addSubWidget(slider);
     }
@@ -299,7 +315,7 @@ int main()
         ci.align_render = oe::alignments::top_right;
         ci.offset_position = { 0, 360 };
         ci.sprite = sprites->empty_sprite();
-        gui_checkbox = new oe::gui::Checkbox(gui_manager, ci);
+        gui_checkbox = new oe::gui::Checkbox(ci);
         gui_manager->addSubWidget(gui_checkbox);
     }
     std::function<void(int, float)> initial = [](int i, float f) { gui_sliders.at(i)->slider_info.initial_value = f; };
@@ -313,12 +329,7 @@ int main()
     // cleanup
     delete gui_manager;
     for (auto i : gui_sliders) { delete i; }
-    delete compute_texture_sprite;
-    delete compute_texture;
     delete fonts;
     delete shader;
-    delete compute_shader;
     delete sprites;
-    delete fb_screen_quad;
-    delete window;
 }
