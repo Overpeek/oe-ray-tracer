@@ -91,7 +91,7 @@ void append_quad(const glm::vec3& pos, const glm::vec2& size, const glm::mat4& o
     vertices.push_back({ {  size_half.x, 0.0f,  size_half.y }, { sprites[0]->position.x + sprites[0]->size.x, sprites[0]->position.y + sprites[0]->size.y }, { sprites[1]->position.x + sprites[1]->size.x, sprites[1]->position.y + sprites[1]->size.y }, color });
     vertices.push_back({ {  size_half.x, 0.0f, -size_half.y }, { sprites[0]->position.x,                      sprites[0]->position.y + sprites[0]->size.y }, { sprites[1]->position.x,                      sprites[1]->position.y + sprites[1]->size.y }, color });
 
-    for (auto& iter = vertices.rbegin(); iter != vertices.rbegin() + 6; iter++)
+    for (auto iter = vertices.rbegin(); iter != vertices.rbegin() + 6; iter++)
     {
         iter->position = pos + glm::vec3(orient * glm::vec4(iter->position, 0.0f));
     }
@@ -106,7 +106,7 @@ void render(float update_fraction)
     glm::mat4 vertical = glm::rotate(glm::half_pi<float>(), glm::vec3(0.0f, 0.0f, 1.0f));
     std::vector<Vertex> vertices;
     append_quad(glm::vec3(0.0f, 0.0f, 0.0f), glm::vec2(10.0f), glm::mat4(1.0f), checkerboard_sprite, oe::colors::white, vertices);
-    append_quad(glm::vec3(4.0f, 2.5f, 4.0f), glm::vec2(10.0f), glm::rotate(glm::half_pi<float>(), glm::vec3(0.0f, 1.0f, 0.0f)) * vertical, { sprites->empty_sprite(), sprites->empty_sprite() }, oe::colors::light_grey, vertices);
+    append_quad(glm::vec3(4.0f, 2.5f, 4.0f), glm::vec2(10.0f), glm::rotate(glm::half_pi<float>(), glm::vec3(0.0f, 1.0f, 0.0f)) * vertical, { sprites->emptySprite(), sprites->emptySprite() }, oe::colors::light_grey, vertices);
     append_quad(glm::vec3(0.0f, 0.5f, 0.5f), glm::vec2(1.0f), glm::rotate(2.0f, glm::vec3(0.0f, 1.0f, 0.0f)) * vertical, obj_sprite, oe::colors::white, vertices);
     vertex_ssbo->setBufferData(vertices.data(), vertices.size() * sizeof(Vertex));
     // spheres
@@ -205,7 +205,7 @@ int main()
     auto& engine = oe::Engine::getSingleton();
     oe::EngineInfo engine_info;
     engine_info.debug_messages = true;
-    // engine_info.ignore_errors = true;
+    engine_info.ignore_errors = false;
     engine.init(engine_info);
 
     // window
@@ -239,10 +239,9 @@ int main()
     // sprites
     sprites = new oe::graphics::SpritePack();
     auto fonts = new oe::graphics::Font();
-	oe::graphics::Text::setFont(fonts);
-    checkerboard_sprite = { sprites->addSprite("res/checkerboard.tex.png"), sprites->addSprite("res/checkerboard.ref.png") };
-    obj_sprite = { sprites->addSprite("res/obj.tex.png"), sprites->addSprite("res/obj.ref.png") };
-    oe_sprite = sprites->addSprite(oe::assets::TextureSet::oe_logo_img);
+    checkerboard_sprite = { sprites->create("res/checkerboard.tex.png"), sprites->create("res/checkerboard.ref.png") };
+    obj_sprite = { sprites->create("res/obj.tex.png"), sprites->create("res/obj.ref.png") };
+    oe_sprite = sprites->create(oe::assets::TextureSet::oe_logo_img);
     sprites->construct();
     // sprites->empty_sprite();
     oe::TextureInfo ti;
@@ -289,7 +288,7 @@ int main()
         dbi.align_render = oe::alignments::top_right;
         dbi.size = { 295, 50 };
         dbi.text = U"button";
-        dbi.sprite = sprites->empty_sprite();
+        dbi.sprite = sprites->emptySprite();
         oe::gui::DecoratedButton* btn = new oe::gui::DecoratedButton(dbi);
         gui_manager->addSubWidget(btn);
     }
@@ -303,8 +302,8 @@ int main()
         si.draw_value = true;
         si.min_value = -2.0f;
         si.max_value = 2.0f;
-        si.slider_sprite = sprites->empty_sprite();
-        si.knob_sprite = sprites->empty_sprite();
+        si.slider_sprite = sprites->emptySprite();
+        si.knob_sprite = sprites->emptySprite();
         auto slider = new oe::gui::Slider(si);
         gui_sliders.push_back(slider);
         gui_manager->addSubWidget(slider);
@@ -314,7 +313,7 @@ int main()
         ci.align_parent = oe::alignments::top_right;
         ci.align_render = oe::alignments::top_right;
         ci.offset_position = { 0, 360 };
-        ci.sprite = sprites->empty_sprite();
+        ci.sprite = sprites->emptySprite();
         gui_checkbox = new oe::gui::Checkbox(ci);
         gui_manager->addSubWidget(gui_checkbox);
     }

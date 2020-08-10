@@ -4,6 +4,7 @@ project("oe-ray-tracer")
 SET(CMAKE_CXX_STANDARD 17)
 
 # game engine dependency
+set(OE_BUILD_MODE 1)
 add_subdirectory("src/vendor/engine")
 
 # project
